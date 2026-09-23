@@ -109,6 +109,27 @@
         </label>
       </div>
       <ul id="batch-file-list" class="batch-file-list" hidden></ul>
+      <details class="batch-policy" id="batch-policy-box">
+        <summary>交付放行策略（按问题代码设置处置；不设置时按级别取默认：错误阻断、警告复核、提示忽略）</summary>
+        <p class="batch-policy-hint">
+          每个问题代码可单独设为 <strong>阻断交付</strong>、<strong>需复核</strong> 或 <strong>忽略</strong>；
+          留空「默认」即按检测级别套用默认处置。策略只保存在本机浏览器，随每次批量校验提交，
+          并完整写入下载的批量 JSON。单文件检测报告及其 <code>passed</code> 含义不受影响。
+        </p>
+        <div class="table-wrap">
+          <table class="batch-policy-table">
+            <thead>
+              <tr>
+                <th>问题代码</th><th>检查项</th><th>检测级别</th><th>默认处置</th><th>本次放行处置</th>
+              </tr>
+            </thead>
+            <tbody id="batch-policy-body"></tbody>
+          </table>
+        </div>
+        <div class="paper-actions">
+          <button id="batch-policy-reset-btn" class="btn small ghost" type="button">全部恢复默认处置</button>
+        </div>
+      </details>
       <div class="btn-row batch-btn-row">
         <button id="batch-run-btn" class="btn primary" disabled>开始批量校验</button>
         <button id="batch-clear-btn" class="btn ghost" type="button" disabled>清空选择</button>
@@ -121,7 +142,10 @@
         <h2>批量校验结果</h2>
         <button id="batch-download-btn" class="btn small success" type="button">下载完整批量 JSON</button>
       </div>
+      <p class="batch-verdict-label">检测结论（错误/警告/提示，含义与原报告一致）</p>
       <p id="batch-verdict" class="report-verdict"></p>
+      <p class="batch-verdict-label">交付放行判定（按下方策略：阻断优先于警告；无法校验为未判定）</p>
+      <p id="batch-release-verdict" class="report-verdict"></p>
       <div id="batch-summary" class="report-summary"></div>
       <details class="page-details" open>
         <summary>各文件结果（点击行展开完整问题明细，共 <span id="batch-file-count">0</span> 个）</summary>
@@ -129,7 +153,7 @@
           <table class="page-table batch-table">
             <thead>
               <tr>
-                <th>#</th><th>状态</th><th>文件名</th><th>页数</th>
+                <th>#</th><th>检测状态</th><th>放行判定</th><th>文件名</th><th>页数</th>
                 <th>错误</th><th>警告</th><th>提示</th><th>问题合计</th>
               </tr>
             </thead>
@@ -143,10 +167,23 @@
           <table class="page-table batch-code-table">
             <thead>
               <tr>
-                <th>问题代码</th><th>级别</th><th>问题</th><th>总次数</th><th>涉及文件数</th><th>涉及文件</th>
+                <th>问题代码</th><th>级别</th><th>放行处置</th><th>问题</th><th>总次数</th><th>涉及文件数</th><th>涉及文件</th>
               </tr>
             </thead>
             <tbody id="batch-code-table-body"></tbody>
+          </table>
+        </div>
+      </details>
+      <details class="page-details" id="batch-policy-report-box">
+        <summary>本次交付放行策略</summary>
+        <div class="table-wrap">
+          <table class="page-table batch-policy-result-table">
+            <thead>
+              <tr>
+                <th>问题代码</th><th>检测级别</th><th>检查项</th><th>处置</th><th>来源</th>
+              </tr>
+            </thead>
+            <tbody id="batch-policy-result-body"></tbody>
           </table>
         </div>
       </details>

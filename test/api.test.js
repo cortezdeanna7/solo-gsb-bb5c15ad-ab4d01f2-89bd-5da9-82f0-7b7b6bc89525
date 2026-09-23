@@ -176,6 +176,23 @@ function jsonRequest(server, urlPath, payload) {
     assert.strictEqual(batch.files[2].status, 'failed');
     assert.strictEqual(batch.files[2].errorCode, 'not_pdf');
 
+    // 批量报告含交付放行判定：成功文件 release=passed；坏文件 undetermined；
+    // 整批因坏文件且无阻断 → undetermined（优先级 blocked > undetermined > review > passed）
+    assert.strictEqual(batch.files[0].release.decision, 'passed');
+    assert.deepStrictEqual(batch.files[0].release.actionCounts, { block: 0, warn: 0, ignore: 0 });
+    assert.strictEqual(batch.files[1].release.decision, 'undetermined');
+    assert.strictEqual(batch.files[2].release.decision, 'undetermined');
+    assert.strictEqual(batch.summary.release.decision, 'undetermined');
+    assert.strictEqual(batch.summary.release.passed, 1);
+    assert.strictEqual(batch.summary.release.undetermined, 2);
+    assert.ok(batch.releasePolicy && Array.isArray(batch.releasePolicy.rules));
+    assert.strictEqual(batch.releasePolicy.rules.length, 6);
+    // issueTotals 每代码带处置字段（默认来源）
+    for (const total of batch.issueTotals) {
+      assert.ok(['block', 'warn', 'ignore'].includes(total.action));
+      assert.strictEqual(total.actionSource, 'default');
+    }
+
     // 全部为坏文件时仍返回 200，逐个记录原因
     const allBadBody = multipartBody({
       files: [
@@ -224,6 +241,79 @@ function jsonRequest(server, urlPath, payload) {
     assert.deepStrictEqual(rot180.files.map((f) => f.name), ['copy-1.pdf', 'copy-2.pdf']);
     // 汇总按级别排序：错误（rotated_180）在提示（blank_padding）之前
     assert.strictEqual(twoBadJson.issueTotals[0].code, 'rotated_180');
+
+    // 默认策略下错误阻断：两个文件 release=blocked，整批 blocked；
+    // 但检测维度 summary.passed 仍为 0（passed 含义不随放行策略改变）
+    assert.strictEqual(twoBadJson.files[0].release.decision, 'blocked');
+    assert.strictEqual(twoBadJson.files[1].release.decision, 'blocked');
+    assert.strictEqual(twoBadJson.summary.release.decision, 'blocked');
+    assert.strictEqual(twoBadJson.summary.release.blocked, 2);
+    const default180 = twoBadJson.issueTotals.find((t) => t.code === 'rotated_180');
+    assert.strictEqual(default180.action, 'block');
+    assert.strictEqual(default180.actionSource, 'default');
+
+    // 自定义放行策略：把 rotated_180（错误）改为 ignore → 两文件均放行（剩余仅提示）
+    const policyBody = multipartBody({
+      text: { releasePolicy: JSON.stringify({ rotated_180: 'ignore' }) },
+      files: [
+        { field: 'pdfs', filename: 'copy-1.pdf', contentType: 'application/pdf', data: pdfBytes },
+        { field: 'pdfs', filename: 'copy-2.pdf', contentType: 'application/pdf', data: pdfBytes },
+      ],
+    }, batchBoundary);
+    const policyResp = await request(server, 'POST', '/api/preflight/batch', {
+      body: policyBody,
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${batchBoundary}`,
+        'Content-Length': policyBody.length,
+      },
+    });
+    assert.strictEqual(policyResp.status, 200);
+    const policyJson = JSON.parse(policyResp.body.toString());
+    assert.strictEqual(policyJson.files[0].release.decision, 'passed');
+    assert.strictEqual(policyJson.files[0].passed, false, '检测 passed 不受策略影响，仍为 false');
+    assert.strictEqual(policyJson.summary.release.decision, 'passed');
+    assert.strictEqual(policyJson.releasePolicy.custom.rotated_180, 'ignore');
+    const custom180 = policyJson.issueTotals.find((t) => t.code === 'rotated_180');
+    assert.strictEqual(custom180.action, 'ignore');
+    assert.strictEqual(custom180.actionSource, 'custom');
+
+    // 非法策略（未知代码）→ 400，不执行校验
+    const badPolicyBody = multipartBody({
+      text: { releasePolicy: JSON.stringify({ unknown_code: 'block' }) },
+      files: [
+        { field: 'pdfs', filename: 'copy-1.pdf', contentType: 'application/pdf', data: pdfBytes },
+      ],
+    }, batchBoundary);
+    const badPolicyResp = await request(server, 'POST', '/api/preflight/batch', {
+      body: badPolicyBody,
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${batchBoundary}`,
+        'Content-Length': badPolicyBody.length,
+      },
+    });
+    assert.strictEqual(badPolicyResp.status, 400);
+    assert.match(JSON.parse(badPolicyResp.body.toString()).error, /放行策略/);
+
+    // 非法策略（处置值不合法 / 非 JSON 字符串）→ 400
+    for (const badPolicy of [
+      JSON.stringify({ rotated_180: 'reject' }),
+      'not-a-json',
+    ]) {
+      const bpBody = multipartBody({
+        text: { releasePolicy: badPolicy },
+        files: [
+          { field: 'pdfs', filename: 'copy-1.pdf', contentType: 'application/pdf', data: pdfBytes },
+        ],
+      }, batchBoundary);
+      const bpResp = await request(server, 'POST', '/api/preflight/batch', {
+        body: bpBody,
+        headers: {
+          'Content-Type': `multipart/form-data; boundary=${batchBoundary}`,
+          'Content-Length': bpBody.length,
+        },
+      });
+      assert.strictEqual(bpResp.status, 400);
+    }
 
     // 缺少文件 -> 400
     const batchEmpty = multipartBody({}, batchBoundary);
@@ -511,7 +601,8 @@ function jsonRequest(server, urlPath, payload) {
 
     console.log('✅ HTTP 集成测试通过：preflight 200 返回 JSON（含错误不阻断），缺文件 400，');
     console.log('   非 PDF 400，损坏文件 422；同一份带错误报告的 PDF 仍可成功 /api/impose；');
-    console.log('   批量校验 /api/preflight/batch：坏文件不阻断好文件、按代码汇总、缺文件/超 10 个 400');
+    console.log('   批量校验 /api/preflight/batch：坏文件不阻断好文件、按代码汇总、缺文件/超 10 个 400、');
+    console.log('   交付放行策略（自定义覆盖 200、非法策略 400）与逐文件/整批放行判定');
   } finally {
     server.close();
   }

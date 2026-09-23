@@ -854,3 +854,119 @@ main {
 }
 .batch-code-files { font-size: 12px; color: #334155; }
 .batch-code-empty { text-align: center; color: var(--muted); }
+
+/* ---------- 批量交付放行判定 ---------- */
+.batch-verdict-label {
+  margin: 10px 0 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.batch-verdict-label:first-child { margin-top: 0; }
+
+/* 放行判定色：阻断红、复核琥珀、放行绿、未判定灰 */
+.release-verdict.blocked { background: #fef2f2; border: 1px solid #f3b4b4; color: #b91c1c; }
+.release-verdict.review { background: #fffbeb; border: 1px solid #fcd34d; color: #b45309; }
+.release-verdict.passed { background: #ecfdf3; border: 1px solid #a7e7c0; color: var(--ok-dark); }
+.release-verdict.undetermined { background: #f3f4f6; border: 1px solid var(--line); color: #4b5563; }
+
+.batch-state,
+.batch-release {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.batch-release.blocked { background: #fee2e2; color: #b91c1c; border: 1px solid #f3b4b4; }
+.batch-release.review { background: #fef3c7; color: #b45309; border: 1px solid #fcd34d; }
+.batch-release.passed { background: #dcfce7; color: var(--ok-dark); border: 1px solid #a7e7c0; }
+.batch-release.undetermined { background: #f3f4f6; color: #4b5563; border: 1px solid var(--line); }
+
+/* 问题代码的放行处置徽标（表格与问题明细共用） */
+.release-action {
+  display: inline-block;
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  background: #eef1f4;
+  color: #334155;
+}
+.release-action.block { background: #fee2e2; color: #b91c1c; }
+.release-action.warn { background: #fef3c7; color: #b45309; }
+.release-action.ignore { background: #e5e7eb; color: #4b5563; }
+.batch-action-source { margin-left: 6px; font-size: 11px; color: var(--muted); }
+
+/* 文件明细中的放行结论文字 */
+.batch-release-line {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.batch-release-line.blocked { background: #fef2f2; border: 1px solid #f3b4b4; color: #b91c1c; }
+.batch-release-line.review { background: #fffbeb; border: 1px solid #fcd34d; color: #b45309; }
+.batch-release-line.passed { background: #ecfdf3; border: 1px solid #a7e7c0; color: var(--ok-dark); }
+.batch-release-line.undetermined { background: #f3f4f6; border: 1px solid var(--line); color: #4b5563; }
+.batch-detail-inner .issue .release-action { margin-left: 6px; font-weight: 600; }
+
+/* 放行策略编辑器 */
+.batch-policy {
+  margin: 4px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 10px 14px;
+}
+.batch-policy summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--brand-dark);
+}
+.batch-policy-hint {
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.batch-policy-hint code,
+.batch-policy-table code,
+.batch-policy-result-table code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: #eef3fb;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.batch-policy-table,
+.batch-policy-result-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 620px;
+}
+.batch-policy-table th,
+.batch-policy-table td,
+.batch-policy-result-table th,
+.batch-policy-result-table td {
+  border: 1px solid var(--line);
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: middle;
+}
+.batch-policy-table th,
+.batch-policy-result-table th { background: #eef3fb; font-weight: 700; white-space: nowrap; }
+.batch-policy-select {
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff;
+  cursor: pointer;
+}
+.batch-policy-table tbody tr:nth-child(even) { background: #fbfcfe; }
+

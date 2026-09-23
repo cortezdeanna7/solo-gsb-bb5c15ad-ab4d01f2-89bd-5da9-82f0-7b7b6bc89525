@@ -8,6 +8,7 @@ const { preflightPdf } = require('./lib/preflight');
 const {
   preflightPdfBatch,
   looksLikePdf: bufferLooksLikePdf,
+  normalizeReleasePolicy,
   BATCH_PREFLIGHT_MAX_FILES,
 } = require('./lib/preflight-batch');
 const { diffPreflightReports } = require('./lib/preflight-diff');
@@ -97,7 +98,18 @@ app.post('/api/preflight/batch', (req, res) => {
       });
     }
 
-    preflightPdfBatch(files)
+    // 可选字段 releasePolicy：按问题代码覆盖放行处置（block/warn/ignore），
+    // JSON 对象或其字符串形式；缺省时代码按严重级别取默认处置。非法策略 400。
+    let releasePolicy;
+    try {
+      releasePolicy = normalizeReleasePolicy(req.body && req.body.releasePolicy);
+    } catch (err) {
+      return res.status(400).json({
+        error: `放行策略无效：${err && err.message ? err.message : '未知错误'}`,
+      });
+    }
+
+    preflightPdfBatch(files, { releasePolicy })
       .then((report) => res.json(report))
       .catch((batchErr) => res.status(500).json({
         error: `批量校验失败：${batchErr && batchErr.message ? batchErr.message : '未知错误'}`,
