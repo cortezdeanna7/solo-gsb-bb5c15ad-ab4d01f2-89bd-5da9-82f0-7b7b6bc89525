@@ -128,6 +128,7 @@ main {
 }
 .report-verdict.ok { background: #ecfdf3; border: 1px solid #a7e7c0; color: var(--ok-dark); }
 .report-verdict.bad { background: #fef2f2; border: 1px solid #f3b4b4; color: #b91c1c; }
+.report-verdict.warn { background: #fffbeb; border: 1px solid #fcd34d; color: #b45309; }
 
 .report-summary {
   display: grid;
@@ -152,6 +153,10 @@ main {
 .report-stat.info .stat-num { color: var(--brand-dark); }
 .report-stat.pages .stat-num { color: #334155; }
 .report-stat.ok .stat-num { color: var(--ok-dark); }
+.report-stat.release-block .stat-num { color: #b91c1c; }
+.report-stat.release-review .stat-num { color: #b45309; }
+.report-stat.release-pass .stat-num { color: var(--ok-dark); }
+.report-stat.release-undetermined .stat-num { color: #6b7280; }
 
 .report-filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .filter-chip {
@@ -854,3 +859,91 @@ main {
 }
 .batch-code-files { font-size: 12px; color: #334155; }
 .batch-code-empty { text-align: center; color: var(--muted); }
+
+/* 放行策略编辑表 */
+.batch-policy-details {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  background: #fbfcfe;
+}
+.batch-policy-details summary { cursor: pointer; font-weight: 700; font-size: 14px; color: var(--brand-dark); }
+.batch-policy-intro { margin: 8px 0; font-size: 13px; color: var(--muted); }
+.batch-policy-table code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  background: #eef3fb;
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.batch-policy-select {
+  font-size: 13px;
+  padding: 3px 6px;
+  border: 1px solid #c3d3ef;
+  border-radius: 6px;
+  background: #fff;
+}
+.batch-policy-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.batch-policy-actions .status { margin: 0; font-size: 12px; }
+
+/* 放行判定徽章：block / review / pass / undetermined */
+.release-decision {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.release-decision.block { background: #fef2f2; color: #b91c1c; border: 1px solid #f3b4b4; }
+.release-decision.review { background: #fffbeb; color: #b45309; border: 1px solid #fcd34d; }
+.release-decision.pass { background: #ecfdf3; color: var(--ok-dark); border: 1px solid #a7e7c0; }
+.release-decision.undetermined { background: #f3f4f6; color: #6b7280; border: 1px solid var(--line); }
+
+/* 问题处置徽章（内联/芯片两种用法） */
+.release-action-inline {
+  display: inline-block;
+  border-radius: 6px;
+  padding: 1px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.release-action-inline.block { background: #fee2e2; color: #b91c1c; }
+.release-action-inline.warn { background: #fef3c7; color: #b45309; }
+.release-action-inline.ignore { background: #e5e7eb; color: #6b7280; }
+.batch-action-src { font-size: 12px; color: var(--muted); }
+
+.batch-release-note {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #334155;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+}
+.batch-release-note.has-ignored { color: #b45309; border-color: #fcd34d; background: #fffbeb; }
+
+.batch-release-box {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  background: #fff;
+}
+.batch-release-head { margin: 0 0 4px; }
+.batch-release-reason { margin: 0 0 6px; font-size: 13px; color: #334155; }
+.batch-release-codes { margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.release-action {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 1px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.release-action.block { background: #fee2e2; color: #b91c1c; }
+.release-action.warn { background: #fef3c7; color: #b45309; }
+.release-action.ignore { background: #e5e7eb; color: #6b7280; }

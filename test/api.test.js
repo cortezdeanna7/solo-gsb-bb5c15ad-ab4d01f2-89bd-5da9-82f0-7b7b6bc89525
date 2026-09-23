@@ -225,6 +225,145 @@ function jsonRequest(server, urlPath, payload) {
     // 汇总按级别排序：错误（rotated_180）在提示（blank_padding）之前
     assert.strictEqual(twoBadJson.issueTotals[0].code, 'rotated_180');
 
+    // ---------- 交付放行判定（release）----------
+    // 默认策略：含 180° 错误的文件判为 block，整批阻断；issueTotals 带默认处置
+    assert.ok(twoBadJson.release, '批量响应应含 release 放行节');
+    assert.strictEqual(twoBadJson.release.decision, 'block');
+    assert.strictEqual(twoBadJson.release.summary.blocked, 2);
+    assert.strictEqual(twoBadJson.release.summary.review, 0);
+    assert.strictEqual(twoBadJson.release.summary.passed, 0);
+    assert.strictEqual(twoBadJson.release.summary.undetermined, 0);
+    assert.deepStrictEqual(twoBadJson.release.policy.rules, {});
+    assert.deepStrictEqual(twoBadJson.release.policy.defaults,
+      { error: 'block', warning: 'warn', info: 'ignore' });
+    assert.strictEqual(twoBadJson.files[0].release.decision, 'block');
+    assert.ok(twoBadJson.files[0].release.reason.includes('rotated_180'));
+    const f0Trigger = twoBadJson.files[0].release.triggered.find((t) => t.code === 'rotated_180');
+    assert.strictEqual(f0Trigger.action, 'block');
+    assert.strictEqual(f0Trigger.actionSource, 'default');
+    const total180 = twoBadJson.issueTotals.find((t) => t.code === 'rotated_180');
+    assert.strictEqual(total180.action, 'block');
+    assert.strictEqual(total180.actionSource, 'default');
+
+    // 混合批次（1 通过 + 2 无法校验）默认策略：整批 undetermined，
+    // 无法校验文件逐文件判为 undetermined，成功文件判为 pass
+    assert.strictEqual(batch.release.decision, 'undetermined');
+    assert.strictEqual(batch.release.summary.passed, 1);
+    assert.strictEqual(batch.release.summary.undetermined, 2);
+    assert.strictEqual(batch.files[0].release.decision, 'pass');
+    assert.strictEqual(batch.files[1].release.decision, 'undetermined');
+    assert.ok(batch.files[1].release.reason.includes('invalid_pdf'));
+    assert.strictEqual(batch.files[2].release.decision, 'undetermined');
+    // 检测报告与 passed 含义保持不变
+    assert.strictEqual(batch.files[0].passed, true);
+    assert.strictEqual(batch.summary.passed, 1);
+
+    // 自定义策略：把唯一错误 rotated_180 降为忽略 -> 两个文件全部 pass
+    const ignoredRotBody = multipartBody({
+      text: { releasePolicy: JSON.stringify({ rules: { rotated_180: 'ignore' } }) },
+      files: [
+        { field: 'pdfs', filename: 'copy-1.pdf', contentType: 'application/pdf', data: pdfBytes },
+        { field: 'pdfs', filename: 'copy-2.pdf', contentType: 'application/pdf', data: pdfBytes },
+      ],
+    }, batchBoundary);
+    const ignoredRot = await request(server, 'POST', '/api/preflight/batch', {
+      body: ignoredRotBody,
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${batchBoundary}`,
+        'Content-Length': ignoredRotBody.length,
+      },
+    });
+    assert.strictEqual(ignoredRot.status, 200);
+    const ignoredRotJson = JSON.parse(ignoredRot.body.toString());
+    assert.strictEqual(ignoredRotJson.release.decision, 'pass');
+    assert.strictEqual(ignoredRotJson.release.summary.passed, 2);
+    assert.deepStrictEqual(ignoredRotJson.release.policy.rules, { rotated_180: 'ignore' });
+    const ignoredTrigger = ignoredRotJson.files[0].release.triggered
+      .find((t) => t.code === 'rotated_180');
+    assert.strictEqual(ignoredTrigger.action, 'ignore');
+    assert.strictEqual(ignoredTrigger.actionSource, 'rule');
+    // 检测报告本身不变：仍有错误级问题、passed=false
+    assert.strictEqual(ignoredRotJson.files[0].passed, false);
+    assert.strictEqual(ignoredRotJson.summary.error, 2);
+
+    // 自定义策略：把警告 transparency 升级为阻断（4 页带透明文字，仅含警告）
+    const warnDoc = await PDFDocument.create();
+    const warnFont = await warnDoc.embedFont(StandardFonts.Helvetica);
+    for (let i = 1; i <= 4; i += 1) {
+      warnDoc.addPage([595.28, 841.89])
+        .drawText(`T ${i}`, { x: 80, y: 400, size: 24, font: warnFont, opacity: 0.5 });
+    }
+    const warnBytes = Buffer.from(await warnDoc.save());
+    const warnPolicyBody = multipartBody({
+      text: { releasePolicy: JSON.stringify({ rules: { transparency: 'block' } }) },
+      files: [
+        { field: 'pdfs', filename: 'trans.pdf', contentType: 'application/pdf', data: warnBytes },
+      ],
+    }, batchBoundary);
+    const warnPolicy = await request(server, 'POST', '/api/preflight/batch', {
+      body: warnPolicyBody,
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${batchBoundary}`,
+        'Content-Length': warnPolicyBody.length,
+      },
+    });
+    assert.strictEqual(warnPolicy.status, 200);
+    const warnPolicyJson = JSON.parse(warnPolicy.body.toString());
+    if (warnPolicyJson.issueTotals.some((t) => t.code === 'transparency')) {
+      assert.strictEqual(warnPolicyJson.release.decision, 'block');
+      assert.strictEqual(warnPolicyJson.files[0].release.decision, 'block');
+      const tp = warnPolicyJson.issueTotals.find((t) => t.code === 'transparency');
+      assert.strictEqual(tp.action, 'block');
+      assert.strictEqual(tp.actionSource, 'rule');
+    }
+
+    // 策略 JSON 非法 -> 400（不放行，避免在策略未生效时给出结论）
+    const badPolicyBody = multipartBody({
+      text: { releasePolicy: '{not-json' },
+      files: [
+        { field: 'pdfs', filename: 'copy-1.pdf', contentType: 'application/pdf', data: pdfBytes },
+      ],
+    }, batchBoundary);
+    const badPolicy = await request(server, 'POST', '/api/preflight/batch', {
+      body: badPolicyBody,
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${batchBoundary}`,
+        'Content-Length': badPolicyBody.length,
+      },
+    });
+    assert.strictEqual(badPolicy.status, 400);
+    assert.match(JSON.parse(badPolicy.body.toString()).error, /放行策略/);
+
+    // 策略含未知代码/非法处置值 -> 不阻断请求，登记 ignoredRules
+    const unknownPolicyBody = multipartBody({
+      text: { releasePolicy: JSON.stringify({ rules: { nope: 'block', transparency: 'fatal' } }) },
+      files: [
+        { field: 'pdfs', filename: 'copy-1.pdf', contentType: 'application/pdf', data: pdfBytes },
+      ],
+    }, batchBoundary);
+    const unknownPolicy = await request(server, 'POST', '/api/preflight/batch', {
+      body: unknownPolicyBody,
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${batchBoundary}`,
+        'Content-Length': unknownPolicyBody.length,
+      },
+    });
+    assert.strictEqual(unknownPolicy.status, 200);
+    const unknownPolicyJson = JSON.parse(unknownPolicy.body.toString());
+    assert.strictEqual(unknownPolicyJson.release.policy.ignoredRules.length, 2);
+    assert.deepStrictEqual(unknownPolicyJson.release.policy.rules, {});
+
+    // 问题代码清单接口
+    const codesResp = await request(server, 'GET', '/api/preflight/issue-codes');
+    assert.strictEqual(codesResp.status, 200);
+    const codesJson = JSON.parse(codesResp.body.toString());
+    assert.ok(Array.isArray(codesJson.codes));
+    const codeRot = codesJson.codes.find((c) => c.code === 'rotated_180');
+    assert.strictEqual(codeRot.severity, 'error');
+    assert.strictEqual(codeRot.defaultAction, 'block');
+    const codeBlank = codesJson.codes.find((c) => c.code === 'blank_padding');
+    assert.strictEqual(codeBlank.defaultAction, 'ignore');
+
     // 缺少文件 -> 400
     const batchEmpty = multipartBody({}, batchBoundary);
     const batchMissing = await request(server, 'POST', '/api/preflight/batch', {

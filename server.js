@@ -10,6 +10,11 @@ const {
   looksLikePdf: bufferLooksLikePdf,
   BATCH_PREFLIGHT_MAX_FILES,
 } = require('./lib/preflight-batch');
+const { ISSUE_META } = require('./lib/preflight');
+const {
+  parseReleasePolicy,
+  resolveIssueAction,
+} = require('./lib/preflight-release');
 const { diffPreflightReports } = require('./lib/preflight-diff');
 const { buildPaperQuote } = require('./lib/quote');
 
@@ -31,6 +36,22 @@ app.use(express.json({ limit: '1mb' }));
 
 app.get('/api/health', (req, res) => {
   res.json({ ok: true });
+});
+
+// 批量放行策略可选的问题代码清单：代码、检测严重级别、标题与默认处置。
+// 前端据此渲染策略编辑表（错误默认阻断、警告默认警告、提示默认忽略）。
+app.get('/api/preflight/issue-codes', (req, res) => {
+  const codes = Object.entries(ISSUE_META).map(([code, meta]) => {
+    const { action, source } = resolveIssueAction(code, meta.severity, new Map());
+    return {
+      code,
+      severity: meta.severity,
+      title: meta.title,
+      defaultAction: action,
+      actionSource: source,
+    };
+  });
+  res.json({ codes });
 });
 
 /**
@@ -97,7 +118,19 @@ app.post('/api/preflight/batch', (req, res) => {
       });
     }
 
-    preflightPdfBatch(files)
+    // 可选字段 releasePolicy：按问题代码设置 block/warn/ignore 的放行策略
+    // （JSON 字符串）。JSON 非法或结构不合法时拒绝整批（400），避免在策略
+    // 未生效的情况下给出放行结论；未知代码/非法处置值则登记忽略，不阻断流程。
+    let policy;
+    try {
+      policy = parseReleasePolicy(req.body && req.body.releasePolicy);
+    } catch (policyErr) {
+      return res.status(400).json({
+        error: policyErr && policyErr.message ? policyErr.message : '放行策略无效',
+      });
+    }
+
+    preflightPdfBatch(files, { policy })
       .then((report) => res.json(report))
       .catch((batchErr) => res.status(500).json({
         error: `批量校验失败：${batchErr && batchErr.message ? batchErr.message : '未知错误'}`,

@@ -1385,14 +1385,37 @@ const batchFileCountEl = document.getElementById('batch-file-count');
 const batchCodeTableBody = document.getElementById('batch-code-table-body');
 const batchCodeCountEl = document.getElementById('batch-code-count');
 const batchDownloadBtn = document.getElementById('batch-download-btn');
+const batchPolicyBody = document.getElementById('batch-policy-body');
+const batchPolicyResetBtn = document.getElementById('batch-policy-reset-btn');
+const batchPolicyNoteEl = document.getElementById('batch-policy-note');
+const batchReleaseNoteEl = document.getElementById('batch-release-note');
 
 let batchFiles = [];
 let batchReportData = null;
+/** 问题代码元数据：[{ code, severity, title, defaultAction }] */
+let batchIssueCodes = [];
+/** 放行策略覆盖项（仅保存与默认不同的）：code -> block/warn/ignore */
+let batchPolicyOverrides = {};
+
+const BATCH_POLICY_STORAGE_KEY = 'batchReleasePolicy.v1';
 
 const BATCH_STATUS_LABELS = {
-  completed_passed: '通过',
+  completed_passed: '检测通过',
   completed_failed: '有错误',
-  failed: '校验失败',
+  failed: '无法校验',
+};
+
+const BATCH_ACTION_LABELS = {
+  block: '阻断',
+  warn: '警告',
+  ignore: '忽略',
+};
+
+const BATCH_DECISION_LABELS = {
+  block: '阻断',
+  review: '需复核',
+  pass: '通过',
+  undetermined: '未判定',
 };
 
 const BATCH_FAILURE_TEXT = {
@@ -1419,7 +1442,107 @@ function clearBatchReport() {
   batchCodeTableBody.innerHTML = '';
   batchSummaryEl.innerHTML = '';
   batchVerdictEl.textContent = '';
+  batchReleaseNoteEl.hidden = true;
+  batchReleaseNoteEl.textContent = '';
 }
+
+/**
+ * 放行策略：优先从后端拉取问题代码清单（与检测级别/默认处置保持同源）；
+ * 拉取失败时回退到内置最小清单，保证页面仍可用。覆盖项存 localStorage。
+ */
+const FALLBACK_ISSUE_CODES = [
+  { code: 'size_mismatch', severity: 'warning', title: '页面尺寸不一致', defaultAction: 'warn' },
+  { code: 'rotated_90_270', severity: 'warning', title: '页面带 90°/270° 旋转角', defaultAction: 'warn' },
+  { code: 'rotated_180', severity: 'error', title: '页面带 180° 旋转（上下颠倒）', defaultAction: 'block' },
+  { code: 'transparency', severity: 'warning', title: '页面包含透明效果', defaultAction: 'warn' },
+  { code: 'no_extractable_text', severity: 'info', title: '未检测到可提取文字', defaultAction: 'ignore' },
+  { code: 'blank_padding', severity: 'info', title: '页数不是 4 的倍数，拼版将补空白页', defaultAction: 'ignore' },
+];
+
+function loadBatchPolicyOverrides() {
+  try {
+    const raw = localStorage.getItem(BATCH_POLICY_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed;
+  } catch (_) { /* 存储损坏则按无覆盖处理 */ }
+  return {};
+}
+
+function saveBatchPolicyOverrides() {
+  try {
+    localStorage.setItem(BATCH_POLICY_STORAGE_KEY, JSON.stringify(batchPolicyOverrides));
+  } catch (_) { /* localStorage 不可用时策略仅在本次会话生效 */ }
+}
+
+function policyActionFor(item) {
+  if (Object.prototype.hasOwnProperty.call(batchPolicyOverrides, item.code)) {
+    return batchPolicyOverrides[item.code];
+  }
+  return item.defaultAction;
+}
+
+function renderBatchPolicyTable() {
+  batchPolicyBody.innerHTML = '';
+  if (!batchIssueCodes.length) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="4" class="batch-code-empty">暂时无法加载问题代码清单。</td>';
+    batchPolicyBody.appendChild(tr);
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  for (const item of batchIssueCodes) {
+    const tr = document.createElement('tr');
+    const current = policyActionFor(item);
+    const options = ['block', 'warn', 'ignore']
+      .map((action) => `<option value="${action}"${action === current ? ' selected' : ''}>`
+        + `${BATCH_ACTION_LABELS[action]}${action === item.defaultAction ? '（默认）' : ''}</option>`)
+      .join('');
+    tr.innerHTML = `<td><code>${escapeHtml(item.code)}</code></td>`
+      + `<td><span class="severity-badge ${item.severity}">${SEVERITY_LABELS[item.severity]}</span></td>`
+      + `<td>${escapeHtml(item.title)}</td>`
+      + `<td><select data-code="${escapeHtml(item.code)}" class="batch-policy-select">${options}</select></td>`;
+    frag.appendChild(tr);
+  }
+  batchPolicyBody.appendChild(frag);
+}
+
+batchPolicyBody.addEventListener('change', (event) => {
+  const select = event.target.closest('.batch-policy-select');
+  if (!select) return;
+  const code = select.dataset.code;
+  const item = batchIssueCodes.find((c) => c.code === code);
+  if (!item) return;
+  if (select.value === item.defaultAction) {
+    delete batchPolicyOverrides[code];
+  } else {
+    batchPolicyOverrides[code] = select.value;
+  }
+  saveBatchPolicyOverrides();
+});
+
+batchPolicyResetBtn.addEventListener('click', () => {
+  batchPolicyOverrides = {};
+  saveBatchPolicyOverrides();
+  renderBatchPolicyTable();
+});
+
+(async function initBatchIssueCodes() {
+  try {
+    const resp = await fetch('/api/preflight/issue-codes');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (data && Array.isArray(data.codes) && data.codes.length) {
+      batchIssueCodes = data.codes;
+    } else {
+      batchIssueCodes = FALLBACK_ISSUE_CODES;
+    }
+  } catch (_) {
+    batchIssueCodes = FALLBACK_ISSUE_CODES;
+  }
+  batchPolicyOverrides = loadBatchPolicyOverrides();
+  renderBatchPolicyTable();
+})();
 
 function renderBatchFileList() {
   batchFileListEl.innerHTML = '';
@@ -1497,6 +1620,10 @@ batchRunBtn.addEventListener('click', async () => {
 
   const form = new FormData();
   batchFiles.forEach((file) => form.append('pdfs', file));
+  // 仅发送覆盖项；未设置的代码由服务端按严重级别取默认处置
+  if (Object.keys(batchPolicyOverrides).length) {
+    form.append('releasePolicy', JSON.stringify({ rules: batchPolicyOverrides }));
+  }
 
   try {
     const resp = await fetch('/api/preflight/batch', { method: 'POST', body: form });
@@ -1510,18 +1637,19 @@ batchRunBtn.addEventListener('click', async () => {
     }
     batchReportData = await resp.json();
     renderBatchReport(batchReportData);
-    const { summary } = batchReportData;
-    if (summary.failed > 0) {
-      setBatchStatus(`批量校验完成：${summary.completed} 个成功、${summary.failed} 个文件无法校验；`
-        + `成功文件共发现 ${summary.error} 个错误、${summary.warning} 个警告、${summary.info} 个提示。`, 'error');
-    } else if (summary.error > 0) {
-      setBatchStatus(`批量校验完成：${summary.passed} / ${summary.total} 个文件通过；`
-        + `共 ${summary.error} 个错误、${summary.warning} 个警告、${summary.info} 个提示。`, 'error');
-    } else if (summary.warning > 0 || summary.info > 0) {
-      setBatchStatus(`批量校验完成：全部 ${summary.total} 个文件无错误级问题；`
-        + `${summary.warning} 个警告、${summary.info} 个提示。`, 'info');
+    const { summary, release } = batchReportData;
+    const releaseText = `放行判定：${BATCH_DECISION_LABELS[release.decision] || release.decision}`
+      + `（阻断 ${release.summary.blocked}、需复核 ${release.summary.review}`
+      + `、通过 ${release.summary.passed}、未判定 ${release.summary.undetermined}）`;
+    if (release.decision === 'block') {
+      setBatchStatus(`批量校验完成：${summary.completed} 个成功、${summary.failed} 个无法校验；`
+        + `${releaseText}，请处理阻断项后重新校验。`, 'error');
+    } else if (release.decision === 'undetermined') {
+      setBatchStatus(`批量校验完成：存在无法校验的文件；${releaseText}，补传可校验文件后再决定放行。`, 'error');
+    } else if (release.decision === 'review') {
+      setBatchStatus(`批量校验完成：${releaseText}；无阻断问题，请人工复核警告项后放行。`, 'info');
     } else {
-      setBatchStatus(`批量校验完成：全部 ${summary.total} 个文件通过，未发现印前问题。`, 'info');
+      setBatchStatus(`批量校验完成：${releaseText}，全部准予放行。`, 'info');
     }
   } catch (err) {
     clearBatchReport();
@@ -1532,15 +1660,19 @@ batchRunBtn.addEventListener('click', async () => {
   }
 });
 
-function renderBatchSummary(summary) {
+function renderBatchSummary(summary, release) {
   batchSummaryEl.innerHTML = '';
   const cards = [
     { level: 'pages', label: '文件总数', count: summary.total },
-    { level: 'ok', label: '校验通过', count: summary.passed },
+    { level: 'ok', label: '检测通过', count: summary.passed },
     { level: 'error', label: '无法校验', count: summary.failed },
     { level: 'error', label: '错误', count: summary.error },
     { level: 'warning', label: '警告', count: summary.warning },
     { level: 'info', label: '提示', count: summary.info },
+    { level: 'release-block', label: '放行阻断', count: release.summary.blocked },
+    { level: 'release-review', label: '需复核', count: release.summary.review },
+    { level: 'release-pass', label: '放行通过', count: release.summary.passed },
+    { level: 'release-undetermined', label: '未判定', count: release.summary.undetermined },
   ];
   for (const card of cards) {
     const div = document.createElement('div');
@@ -1551,6 +1683,42 @@ function renderBatchSummary(summary) {
   }
 }
 
+/** 渲染逐文件放行判定块：结论徽章 + 触发代码及处置清单 */
+function buildBatchReleaseBox(item) {
+  const box = document.createElement('div');
+  box.className = 'batch-release-box';
+  const release = item.release;
+  if (!release) return box;
+
+  const head = document.createElement('p');
+  head.className = 'batch-release-head';
+  const badge = document.createElement('span');
+  badge.className = `release-decision ${release.decision}`;
+  badge.textContent = `放行判定：${BATCH_DECISION_LABELS[release.decision] || release.decision}`;
+  head.appendChild(badge);
+  box.appendChild(head);
+
+  const reason = document.createElement('p');
+  reason.className = 'batch-release-reason';
+  reason.textContent = release.reason || '';
+  box.appendChild(reason);
+
+  if (release.triggered && release.triggered.length) {
+    const chips = document.createElement('p');
+    chips.className = 'batch-release-codes';
+    for (const trigger of release.triggered) {
+      const chip = document.createElement('span');
+      chip.className = `release-action ${trigger.action}`;
+      const src = trigger.actionSource === 'rule' ? '策略' : '默认';
+      chip.textContent = `${trigger.code} · ${BATCH_ACTION_LABELS[trigger.action] || trigger.action}`
+        + ` ×${trigger.count}（${src}）`;
+      chips.appendChild(chip);
+    }
+    box.appendChild(chips);
+  }
+  return box;
+}
+
 /**
  * 在可展开行下方插入整行明细：失败文件显示失败原因；成功文件复用单文件
  * 报告的问题区段渲染逻辑（徽章 + 标题 + 范围 + 说明 + 修复建议）。
@@ -1559,9 +1727,12 @@ function buildBatchDetailRow(item) {
   const detailTr = document.createElement('tr');
   detailTr.className = 'batch-detail-row';
   const td = document.createElement('td');
-  td.colSpan = 8;
+  td.colSpan = 9;
   const inner = document.createElement('div');
   inner.className = 'batch-detail-inner';
+
+  // 放行判定置顶展示（无法校验文件同样给出「未判定」结论与原因）
+  inner.appendChild(buildBatchReleaseBox(item));
 
   if (item.status === 'failed') {
     const p = document.createElement('p');
@@ -1580,7 +1751,7 @@ function buildBatchDetailRow(item) {
       const list = document.createElement('ul');
       list.className = 'issue-list';
       for (const issue of report.issues) {
-        list.appendChild(buildBatchIssueElement(issue));
+        list.appendChild(buildBatchIssueElement(issue, item.release));
       }
       inner.appendChild(list);
     }
@@ -1590,7 +1761,7 @@ function buildBatchDetailRow(item) {
   return detailTr;
 }
 
-function buildBatchIssueElement(issue) {
+function buildBatchIssueElement(issue, fileRelease) {
   const li = document.createElement('li');
   li.className = `issue ${issue.severity}`;
 
@@ -1599,6 +1770,20 @@ function buildBatchIssueElement(issue) {
   const badge = document.createElement('span');
   badge.className = `severity-badge ${issue.severity}`;
   badge.textContent = SEVERITY_LABELS[issue.severity];
+  head.appendChild(badge);
+
+  // 放行处置徽章：与检测级别并列，便于看出「警告但被忽略」等覆盖关系
+  if (fileRelease && Array.isArray(fileRelease.triggered)) {
+    const trigger = fileRelease.triggered.find((t) => t.code === issue.code);
+    if (trigger) {
+      const action = document.createElement('span');
+      action.className = `release-action-inline ${trigger.action}`;
+      const src = trigger.actionSource === 'rule' ? '策略' : '默认';
+      action.textContent = `放行：${BATCH_ACTION_LABELS[trigger.action] || trigger.action}（${src}）`;
+      head.appendChild(action);
+    }
+  }
+
   const title = document.createElement('span');
   title.className = 'issue-title';
   title.textContent = issue.title;
@@ -1606,7 +1791,7 @@ function buildBatchIssueElement(issue) {
   range.className = 'issue-range';
   range.textContent = formatRange(issue)
     + (issue.pageCount > 1 ? `（连续 ${issue.pageCount} 页）` : '');
-  head.append(badge, title, range);
+  head.append(title, range);
   li.appendChild(head);
 
   const message = document.createElement('p');
@@ -1649,8 +1834,14 @@ function renderBatchTable(files) {
     const stateClass = failed ? 'failed' : (item.passed ? 'ok' : 'bad');
     const counts = item.counts || { error: 0, warning: 0, info: 0, issuesTotal: 0 };
 
+    const decision = item.release
+      ? (BATCH_DECISION_LABELS[item.release.decision] || item.release.decision)
+      : '—';
+    const decisionKey = item.release ? item.release.decision : 'undetermined';
+
     tr.innerHTML = `<td class="batch-idx">${item.index + 1}</td>`
       + `<td><span class="batch-state ${stateClass}">${state}</span></td>`
+      + `<td><span class="release-decision ${decisionKey}">${decision}</span></td>`
       + `<td class="batch-name">${escapeHtml(item.file && item.file.name ? item.file.name : '未命名文件')}</td>`
       + `<td>${item.pageCount === null ? '—' : `${item.pageCount} 页`}</td>`
       + `<td>${counts.error}</td><td>${counts.warning}</td><td>${counts.info}</td>`
@@ -1675,7 +1866,7 @@ function renderBatchCodeTotals(issueTotals) {
   batchCodeCountEl.textContent = String(issueTotals.length);
   if (!issueTotals.length) {
     const tr = document.createElement('tr');
-    tr.innerHTML = '<td colspan="6" class="batch-code-empty">全部文件均未发现印前问题。</td>';
+    tr.innerHTML = '<td colspan="7" class="batch-code-empty">全部文件均未发现印前问题。</td>';
     batchCodeTableBody.appendChild(tr);
     return;
   }
@@ -1685,9 +1876,13 @@ function renderBatchCodeTotals(issueTotals) {
     const fileText = item.files
       .map((f) => `${f.index + 1}. ${f.name || '未命名文件'}`)
       .join('；');
+    const actionLabel = BATCH_ACTION_LABELS[item.action] || item.action;
+    const actionSrc = item.actionSource === 'rule' ? '策略设置' : '按级别默认';
     tr.innerHTML = `<td><code>${escapeHtml(item.code)}</code></td>`
       + `<td><span class="severity-badge ${item.severity}">${SEVERITY_LABELS[item.severity]}</span></td>`
       + `<td>${escapeHtml(item.title)}</td>`
+      + `<td><span class="release-action-inline ${item.action}">${actionLabel}</span>`
+        + ` <span class="batch-action-src">（${actionSrc}）</span></td>`
       + `<td>${item.count}</td>`
       + `<td>${item.fileCount}</td>`
       + `<td class="batch-code-files">${escapeHtml(fileText)}</td>`;
@@ -1698,19 +1893,49 @@ function renderBatchCodeTotals(issueTotals) {
 
 function renderBatchReport(data) {
   batchReportEl.hidden = false;
-  const { summary } = data;
-  batchVerdictEl.className = `report-verdict ${summary.allPassed ? 'ok' : 'bad'}`;
-  if (summary.failed > 0) {
-    batchVerdictEl.textContent = `结论：共 ${summary.total} 个文件，${summary.completed} 个完成校验`
-      + `（其中 ${summary.passed} 个通过），${summary.failed} 个文件无法校验（缺失/非 PDF/损坏/加密），`
-      + '请展开对应行查看失败原因。';
-  } else if (summary.allPassed) {
-    batchVerdictEl.textContent = `结论：全部 ${summary.total} 个文件均无错误级问题，警告/提示可选择性处理。`;
+  const { summary, release } = data;
+
+  // 放行结论横幅：阻断 / 未判定 / 需复核 / 通过
+  batchVerdictEl.className = 'report-verdict';
+  if (release.decision === 'block') {
+    batchVerdictEl.classList.add('bad');
+    batchVerdictEl.textContent = `放行结论：阻断（共 ${release.summary.blocked} 个文件命中阻断处置），`
+      + '请处理阻断问题代码后重新校验再交付。';
+  } else if (release.decision === 'undetermined') {
+    batchVerdictEl.classList.add('bad');
+    batchVerdictEl.textContent = `放行结论：未判定（${release.summary.undetermined} 个文件无法校验、`
+      + `${release.summary.blocked} 个阻断、${release.summary.review} 个需复核），`
+      + '请补传可正常校验的文件后再决定放行。';
+  } else if (release.decision === 'review') {
+    batchVerdictEl.classList.add('warn');
+    batchVerdictEl.textContent = `放行结论：需复核（${release.summary.review} 个文件命中警告处置，无阻断项），`
+      + '请人工确认警告问题代码后放行。';
   } else {
-    batchVerdictEl.textContent = `结论：${summary.total} 个文件全部完成校验，其中 ${summary.passed} 个通过；`
-      + `共 ${summary.error} 个错误级问题，建议修复后再印刷。`;
+    batchVerdictEl.classList.add('ok');
+    batchVerdictEl.textContent = '放行结论：通过（全部文件无阻断/警告处置项），准予交付。';
   }
-  renderBatchSummary(summary);
+
+  // 策略摘要：展示本次实际生效的规则与被忽略的非法配置
+  const ruleCodes = Object.keys(release.policy.rules);
+  const noteParts = [];
+  if (ruleCodes.length) {
+    noteParts.push(`本次策略覆盖：${ruleCodes
+      .map((code) => `${code}→${BATCH_ACTION_LABELS[release.policy.rules[code]] || release.policy.rules[code]}`)
+      .join('、')}`);
+  } else {
+    noteParts.push('未设置自定义策略，全部按检测级别默认处置（错误阻断 / 警告需复核 / 提示忽略）。');
+  }
+  if (release.policy.ignoredRules && release.policy.ignoredRules.length) {
+    noteParts.push(`另有 ${release.policy.ignoredRules.length} 条策略因代码不存在或处置值非法被忽略`);
+  }
+  batchReleaseNoteEl.hidden = false;
+  batchReleaseNoteEl.textContent = noteParts.join('；');
+  batchReleaseNoteEl.className = 'batch-release-note';
+  if (release.policy.ignoredRules && release.policy.ignoredRules.length) {
+    batchReleaseNoteEl.classList.add('has-ignored');
+  }
+
+  renderBatchSummary(summary, release);
   renderBatchTable(data.files);
   renderBatchCodeTotals(data.issueTotals);
 }

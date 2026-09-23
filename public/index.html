@@ -109,6 +109,30 @@
         </label>
       </div>
       <ul id="batch-file-list" class="batch-file-list" hidden></ul>
+
+      <details class="batch-policy-details">
+        <summary>交付放行策略（可选：按问题代码设置 阻断 / 警告 / 忽略）</summary>
+        <p class="batch-policy-intro">
+          未设置时沿用默认：<strong>错误 → 阻断、警告 → 警告（需复核）、提示 → 忽略</strong>。
+          策略仅保存在本机浏览器；逐文件按「阻断优先于警告」判为<strong>阻断 / 需复核 / 通过</strong>，
+          无法校验的文件标为<strong>未判定</strong>。
+        </p>
+        <div class="table-wrap">
+          <table class="page-table batch-policy-table">
+            <thead>
+              <tr>
+                <th>问题代码</th><th>检测级别</th><th>问题</th><th>放行处置</th>
+              </tr>
+            </thead>
+            <tbody id="batch-policy-body"></tbody>
+          </table>
+        </div>
+        <div class="batch-policy-actions">
+          <button id="batch-policy-reset-btn" class="btn small ghost" type="button">恢复默认处置</button>
+          <span id="batch-policy-note" class="status" role="status"></span>
+        </div>
+      </details>
+
       <div class="btn-row batch-btn-row">
         <button id="batch-run-btn" class="btn primary" disabled>开始批量校验</button>
         <button id="batch-clear-btn" class="btn ghost" type="button" disabled>清空选择</button>
@@ -122,14 +146,15 @@
         <button id="batch-download-btn" class="btn small success" type="button">下载完整批量 JSON</button>
       </div>
       <p id="batch-verdict" class="report-verdict"></p>
+      <p id="batch-release-note" class="batch-release-note" hidden></p>
       <div id="batch-summary" class="report-summary"></div>
       <details class="page-details" open>
-        <summary>各文件结果（点击行展开完整问题明细，共 <span id="batch-file-count">0</span> 个）</summary>
+        <summary>各文件结果（点击行展开完整问题明细与放行判定，共 <span id="batch-file-count">0</span> 个）</summary>
         <div class="table-wrap">
           <table class="page-table batch-table">
             <thead>
               <tr>
-                <th>#</th><th>状态</th><th>文件名</th><th>页数</th>
+                <th>#</th><th>检测状态</th><th>放行判定</th><th>文件名</th><th>页数</th>
                 <th>错误</th><th>警告</th><th>提示</th><th>问题合计</th>
               </tr>
             </thead>
@@ -143,7 +168,7 @@
           <table class="page-table batch-code-table">
             <thead>
               <tr>
-                <th>问题代码</th><th>级别</th><th>问题</th><th>总次数</th><th>涉及文件数</th><th>涉及文件</th>
+                <th>问题代码</th><th>级别</th><th>问题</th><th>放行处置</th><th>总次数</th><th>涉及文件数</th><th>涉及文件</th>
               </tr>
             </thead>
             <tbody id="batch-code-table-body"></tbody>
